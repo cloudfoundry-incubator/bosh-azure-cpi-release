@@ -135,14 +135,27 @@ module Bosh::AzureCloud
 
       storage_account_name = @azure_config.storage_account_name
       unless storage_account_name.nil?
-        @logger.debug("The default storage account is '#{storage_account_name}'")
+        @logger.debug("The default storage account in global settings is '#{storage_account_name}'")
         @default_storage_account = @azure_client.get_storage_account_by_name(storage_account_name)
         cloud_error("The default storage account '#{storage_account_name}' is specified in Global Configuration, but it does not exist.") if @default_storage_account.nil?
         @azure_client.update_tags_of_storage_account(storage_account_name, STEMCELL_STORAGE_ACCOUNT_TAGS) if @use_managed_disks && !is_stemcell_storage_account?(@default_storage_account[:tags])
         return @default_storage_account
       end
+      @logger.debug("The default storage account is not specified in global settings.")
 
-      @logger.debug('The default storage account is not specified in global settings.')
+      storage_account_name = get_storage_account_name_from_cache
+      unless storage_account_name.empty?
+        @logger.debug("Choose the default storage account from cache: '#{storage_account_name}'")
+        storage_account = @azure_client.get_storage_account_by_name(storage_account_name)
+        unless storage_account.nil?
+          @default_storage_account = storage_account
+          return @default_storage_account
+        end
+        remove_storage_account_name_cache
+        @logger.debug("The storage account '#{storage_account_name}' from cache does not exist.")
+      end
+      @logger.debug("The default storage account is not specified in cache.")
+
       storage_accounts = @azure_client.list_storage_accounts
       location = @azure_client.get_resource_group(@azure_config.resource_group_name)[:location]
       @logger.debug("Will look for an existing storage account with the tags '#{STEMCELL_STORAGE_ACCOUNT_TAGS}' in the location '#{location}'")
@@ -150,8 +163,11 @@ module Bosh::AzureCloud
         s[:location] == location && is_stemcell_storage_account?(s[:tags])
       end
       unless storage_account.nil?
-        @logger.debug("The default storage account is '#{storage_account[:name]}'")
+        storage_account_name = storage_account[:name]
+        @logger.debug("Choose '#{storage_account_name}' as the default storage account")
         @default_storage_account = storage_account
+        @azure_client.update_tags_of_storage_account(storage_account_name, STEMCELL_STORAGE_ACCOUNT_TAGS) if @use_managed_disks && !is_stemcell_storage_account?(@default_storage_account[:tags])
+        set_storage_account_name_to_cache(storage_account_name)
         return @default_storage_account
       end
 
